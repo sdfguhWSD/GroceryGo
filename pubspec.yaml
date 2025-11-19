@@ -1,0 +1,83 @@
+name: online_groceryshopping_app
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  carousel_slider: ^5.1.1
+  image_picker: ^1.0.7
+  http: ^1.2.0
+
+  # --- Firebase (Compatible Versions) ---
+  firebase_core: ^3.15.2
+  firebase_auth: ^5.7.0
+  cloud_firestore: ^5.6.12
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/image/cat1.png
+    - assets/image/cat2.png
+    - assets/image/cat3.png
+    - assets/image/cat4.png
+    - assets/image/cat5.png
+    - assets/image/cat6.png
+    - assets/image/cat7.png
+    - assets/image/cat8.png
+    - assets/image/gro.png
+    - assets/image/groce1.png
+    - assets/image/groce2.png
+    - assets/image/groce3.png
+    - assets/image/groce4.png
+    - assets/image/groce5.png
+    - assets/image/f1.png
+    - assets/image/f2.png
+    - assets/image/f3.png
+    - assets/image/f4.png
+    - assets/image/f5.png
+    - assets/image/fr1.png
+    - assets/image/fr2.png
+    - assets/image/fr3.png
+    - assets/image/fr4.png
+    - assets/image/fr5.png
+    - assets/image/d1.png
+    - assets/image/d2.png
+    - assets/image/d3.png
+    - assets/image/d4.png
+    - assets/image/d5.png
+    - assets/image/e1.png
+    - assets/image/e2.png
+    - assets/image/e3.png
+    - assets/image/e4.png
+    - assets/image/e5.png
+    - assets/image/b1.png
+    - assets/image/b2.png
+    - assets/image/b3.png
+    - assets/image/b4.png
+    - assets/image/b5.png
+    - assets/image/bk1.png
+    - assets/image/bk2.png
+    - assets/image/bk3.png
+    - assets/image/bk4.png
+    - assets/image/bk5.png
+    - assets/image/m1.png
+    - assets/image/m2.png
+    - assets/image/m3.png
+    - assets/image/m4.png
+    - assets/image/m5.png
+    - assets/image/56.png
