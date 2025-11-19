@@ -10,7 +10,7 @@ void _logout(BuildContext context) async {
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      // Improved look: Title with icon and consistent padding
+      // Improved look: Title with icon a  nd consistent padding
       title: Row(
         children: [
           Icon(Icons.warning_amber_rounded, color: Colors.deepOrange, size: 28),

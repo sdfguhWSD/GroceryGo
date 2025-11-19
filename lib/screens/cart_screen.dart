@@ -38,6 +38,7 @@ class _CartScreenState extends State<CartScreen> {
 
   Set<String> selectedItemIds = <String>{};
   bool selectAll = false;
+  bool _isProcessing = false; // Prevent multiple submissions
 
   String? get currentUserId => FirebaseAuth.instance.currentUser?.uid;
 
@@ -249,13 +250,20 @@ class _CartScreenState extends State<CartScreen> {
                 ElevatedButton.icon(
                   onPressed: selectedPaymentMethod != null
                       ? () {
+                          // FIXED: Close dialog first, then proceed with checkout
                           Navigator.of(dialogContext).pop();
-                          _checkoutTransaction(
-                            context,
-                            selectedItems,
-                            totalAmount,
-                            selectedPaymentMethod!,
-                          );
+
+                          // Add a small delay to ensure dialog closes properly
+                          Future.delayed(Duration(milliseconds: 150), () {
+                            if (context.mounted) {
+                              _checkoutTransaction(
+                                context,
+                                selectedItems,
+                                totalAmount,
+                                selectedPaymentMethod!,
+                              );
+                            }
+                          });
                         }
                       : null,
                   style: ElevatedButton.styleFrom(
@@ -294,114 +302,239 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   // Checkout Transaction - includes payment method and delivery address
+  // Checkout Transaction - FINAL FIXED VERSION
   Future<void> _checkoutTransaction(
     BuildContext context,
     List<CartItemModel> selectedItems,
     double totalAmount,
     String paymentMethod,
   ) async {
+    // Prevent multiple submissions
+    if (_isProcessing) return;
+
     final userId = currentUserId;
     if (userId == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: User not logged in!')));
-      }
+      _showMessage(context, 'Error: User not logged in!', isError: true);
       return;
     }
 
     if (selectedItems.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Please select at least one item to checkout'),
-            backgroundColor: Colors.orange[700],
-          ),
-        );
-      }
+      _showMessage(context, 'Please select at least one item to checkout',
+          isError: true);
       return;
     }
 
-    // Show loading dialog
-    if (context.mounted) {
-      showDialog(
-        context: context,
+    setState(() {
+      _isProcessing = true;
+    });
+
+    // Store context and create a completer to track dialog state
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    // Show loading dialog and store whether it was shown
+    navigator.push(
+      PageRouteBuilder(
+        opaque: false,
         barrierDismissible: false,
-        builder: (BuildContext context) {
-          return Center(
-            child: CircularProgressIndicator(color: Colors.green[700]),
-          );
-        },
-      );
-    }
+        barrierColor: Colors.black54,
+        pageBuilder: (_, __, ___) => WillPopScope(
+          onWillPop: () async => false,
+          child: Center(
+            child: Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(15),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: CircularProgressIndicator(
+                      color: Colors.green[700],
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Processing order...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[800],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
 
     try {
-      // Fetch user's delivery address
-      Map<String, dynamic>? deliveryAddress;
-      try {
-        final addressSnapshot = await _firestore
-            .collection('addresses')
-            .where('userId', isEqualTo: userId)
-            .orderBy('createdAt', descending: true)
-            .limit(1)
-            .get();
+      // Perform checkout with timeout
+      await _performCheckout(userId, selectedItems, totalAmount, paymentMethod)
+          .timeout(Duration(seconds: 15));
 
-        if (addressSnapshot.docs.isNotEmpty) {
-          deliveryAddress = addressSnapshot.docs.first.data();
-        }
-      } catch (e) {
-        print('Error fetching address: $e');
+      // Close loading dialog
+      navigator.pop();
+
+      // Clear selection
+      if (mounted) {
+        setState(() {
+          selectedItemIds.clear();
+          selectAll = false;
+          _isProcessing = false;
+        });
       }
 
-      // Check if address exists
-      if (deliveryAddress == null) {
-        // Close loading dialog
-        if (context.mounted) Navigator.of(context).pop();
+      // Show success message
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Order placed!\n$paymentMethod • ₱${totalAmount.toStringAsFixed(2)}',
+                  style: TextStyle(fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.green[700],
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      // Close loading dialog
+      navigator.pop();
 
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content:
-                  Text('Please add a delivery address before placing an order'),
-              backgroundColor: Colors.orange[700],
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-        return;
-      }
-      // First, read all product data
-      final Map<String, DocumentSnapshot> productSnapshots = {};
-      for (final item in selectedItems) {
-        final productRef =
-            _firestore.collection('products').doc(item.productId);
-        final snapshot = await productRef.get();
-        productSnapshots[item.productId] = snapshot;
-      }
-
-      // Validate stock availability before transaction
-      for (final item in selectedItems) {
-        final productSnapshot = productSnapshots[item.productId];
-
-        if (productSnapshot == null || !productSnapshot.exists) {
-          throw Exception('Product ${item.name} not found in inventory!');
-        }
-
-        final productData = productSnapshot.data() as Map<String, dynamic>?;
-        final currentStock = (productData?['quantity'] as num?)?.toInt() ?? 0;
-
-        if (currentStock < item.quantity) {
-          throw Exception(
-              'Insufficient stock for ${item.name}. Available: $currentStock, Requested: ${item.quantity}');
-        }
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
       }
 
-      // Now perform the transaction
-      await _firestore.runTransaction((transaction) async {
+      print('Checkout failed: $e');
+
+      // Show error message
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.error_outline, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  e.toString().contains('TimeoutException')
+                      ? 'Request timeout. Please check your internet connection.'
+                      : e.toString().replaceAll('Exception:', '').trim(),
+                  style: TextStyle(fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red[700],
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // Helper method to show messages safely
+  void _showMessage(BuildContext context, String message,
+      {bool isError = false}) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red[700] : Colors.orange[700],
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // Separate method for the actual checkout logic
+  Future<void> _performCheckout(
+    String userId,
+    List<CartItemModel> selectedItems,
+    double totalAmount,
+    String paymentMethod,
+  ) async {
+    // Parallel execution for faster processing
+    final results = await Future.wait([
+      // Fetch address
+      _firestore
+          .collection('addresses')
+          .where('userId', isEqualTo: userId)
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .get()
+          .timeout(Duration(seconds: 5)),
+      // Fetch all product snapshots in parallel
+      Future.wait(selectedItems.map((item) => _firestore
+          .collection('products')
+          .doc(item.productId)
+          .get()
+          .timeout(Duration(seconds: 5)))),
+    ]);
+
+    final addressSnapshot = results[0] as QuerySnapshot;
+    final productSnapshots = results[1] as List<DocumentSnapshot>;
+
+    // Check if address exists
+    if (addressSnapshot.docs.isEmpty) {
+      throw Exception('Please add a delivery address before placing an order');
+    }
+
+    // Build product snapshots map
+    final Map<String, DocumentSnapshot> productSnapshotsMap = {};
+    for (int i = 0; i < selectedItems.length; i++) {
+      productSnapshotsMap[selectedItems[i].productId] = productSnapshots[i];
+    }
+
+    // Validate stock availability
+    for (final item in selectedItems) {
+      final productSnapshot = productSnapshotsMap[item.productId];
+
+      if (productSnapshot == null || !productSnapshot.exists) {
+        throw Exception('Product ${item.name} not found!');
+      }
+
+      final productData = productSnapshot.data() as Map<String, dynamic>?;
+      final currentStock = (productData?['quantity'] as num?)?.toInt() ?? 0;
+
+      if (currentStock < item.quantity) {
+        throw Exception(
+            'Insufficient stock for ${item.name}. Available: $currentStock');
+      }
+    }
+
+    // Perform the transaction with timeout
+    await _firestore.runTransaction(
+      (transaction) async {
         final now = Timestamp.now();
 
-        // 1. Create the Order Document with payment method
+        // Create order
         final orderRef = _firestore.collection('orders').doc();
-        final orderData = {
+        transaction.set(orderRef, {
           'userId': userId,
           'totalAmount': totalAmount,
           'timestamp': now,
@@ -415,71 +548,25 @@ class _CartScreenState extends State<CartScreen> {
                     'quantity': item.quantity,
                   })
               .toList(),
-        };
-        transaction.set(orderRef, orderData);
+        });
 
-        // 2. Update Product Inventory and Delete Cart Items
+        // Update inventory and remove cart items
         final cartDocRef = _firestore.collection('carts').doc(userId);
 
         for (final item in selectedItems) {
-          // A. Update Product Inventory (Decrement 'quantity')
           final productRef =
               _firestore.collection('products').doc(item.productId);
-          final productSnapshot = productSnapshots[item.productId]!;
-
+          final productSnapshot = productSnapshotsMap[item.productId]!;
           final productData = productSnapshot.data() as Map<String, dynamic>?;
           final currentStock = (productData?['quantity'] as num?)?.toInt() ?? 0;
-          final newStock = currentStock - item.quantity;
 
-          // Update the quantity field
-          transaction.update(productRef, {
-            'quantity': newStock,
-          });
-
-          // B. Delete the Cart Item
-          final cartItemRef = cartDocRef.collection('items').doc(item.docId);
-          transaction.delete(cartItemRef);
+          transaction
+              .update(productRef, {'quantity': currentStock - item.quantity});
+          transaction.delete(cartDocRef.collection('items').doc(item.docId));
         }
-      });
-
-      // Close loading dialog
-      if (context.mounted) Navigator.of(context).pop();
-
-      // Clear selection after successful checkout
-      if (mounted) {
-        setState(() {
-          selectedItemIds.clear();
-          selectAll = false;
-        });
-      }
-
-      // Show success message with payment method
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Order placed successfully!\nPayment: $paymentMethod\nTotal: ₱${totalAmount.toStringAsFixed(2)}'),
-            backgroundColor: Colors.green[700],
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
-    } catch (e) {
-      // Close loading dialog
-      if (context.mounted) Navigator.of(context).pop();
-
-      print('Checkout failed: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Checkout failed: ${e.toString().replaceAll('Exception:', '').trim()}'),
-            backgroundColor: Colors.red[700],
-            duration: const Duration(seconds: 6),
-          ),
-        );
-      }
-    }
+      },
+      timeout: Duration(seconds: 8),
+    );
   }
 
   // Shows payment method dialog
